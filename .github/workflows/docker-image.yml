@@ -1,0 +1,54 @@
+name: Docker Image CI
+
+#监听仓库的master分支的提交和拉取申请
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+#配置镜像打包任务
+  image-build-push:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    #登录docker仓库这里用的阿里云仓库
+    - name: Docker Login
+      uses: docker/login-action@v3.0.0
+      with:
+       registry: registry.cn-beijing.aliyuncs.com
+       username: ${{ secrets.DOCKHUBNAME }}
+       password: ${{ secrets.DOCKERHUBPASSWORD }}
+    #构建镜像并且推送到镜像仓库
+    - name: Build & Publish to Registry
+      run: |
+        ls -la
+        docker build . --file Dockerfile --tag registry.cn-beijing.aliyuncs.com/riban/riban-web:${{ github.sha }}
+        docker images
+        docker push registry.cn-beijing.aliyuncs.com/riban/riban-web:${{ github.sha }}
+  #创建更改配置仓库任务
+  edit-image-tag:
+    needs: image-build-push
+    runs-on: ubuntu-latest
+    steps:
+     - name: Checkout code
+       uses: actions/checkout@v2
+
+     - name: Push to another repository
+       env:
+         ACCESS_TOKEN: ${{ secrets.CDACCESSTOKEN }}
+       run: |
+         # git clone https://github.com/kgdone/riban-cd.git
+         # 拉取配置仓库的配置代码
+         git clone https://kgdone:$ACCESS_TOKEN@github.com/kgdone/riban-cd.git
+         # 修改原来的镜像为这次构建的镜像
+         sed -i "s/`cat riban-cd/riban-web/riban-deployment.yaml | grep image: | awk -F ":" {'print $3'}`/${{ github.sha }}/g" ./riban-cd/riban-web/riban-deployment.yaml
+         cd riban-cd
+         #将修改过后的配置代码推送到配置仓库
+         git config --global user.email "181893091@qq.com"
+         git config --global user.name "kgdone"
+         git remote add argo https://kgdone:$ACCESS_TOKEN@github.com/kgdone/riban-cd.git
+         git add .
+         git commit -m "change image tag"
+         git push argo main
